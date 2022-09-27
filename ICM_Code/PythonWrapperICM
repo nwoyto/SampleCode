@@ -1,0 +1,247 @@
+import os.path
+from argparse import ArgumentParser
+from os.path import exists
+
+
+class icm_script():
+    def __init__(self):
+        self.script=''
+        self.load_object = None
+        self.add_aas=''
+        self.mutation_script = ''
+        self.single_aa_mutation = ''
+        return
+
+    def create_loading_script(self,
+                              loading_script_location,
+                              working_directory,
+                              docking_hitlist,
+                              docking_score,
+                              pdb_ref,
+                              use_loading=False):
+        if use_loading:
+            if not loading_script_location:
+                loading_script_location = "/Users/GeneCentrix/google_drive/allergan_project/icm_files/peptide_discovery_p2rx3/scripts/load_object.icm"
+            loading_script = open(loading_script_location, 'r').read()
+            self.load_object = loading_script.format(working_directory=working_directory,
+                                                     docking_hitlist=working_directory + docking_hitlist,
+                                                     docking_hitlist_table=docking_hitlist.split('.')[0],
+                                                     docking_score=docking_score,
+                                                     pdb_ref=pdb_ref
+                                                     )
+        return
+
+    def create_icm_script(self,
+                          mutation_script_location,
+                          location,
+                          surround_aa,
+                          kind,
+                          unfix_n=False,
+                          file_name='',
+                          ref=None
+                          ):
+        """
+        amino_acid
+        location: location of aa to modify eg: a_3.a23/5
+        kind: append , reverse, mutate
+        """
+        if kind == 'append':
+            modification_prefix = "append"
+        elif kind == 'reverse':
+            modification_prefix = "append reverse"
+        else:
+            modification_prefix = ""
+        # TODO: add self tethers / add other optimized montecarlo and minimization parameters
+        if not ref:
+            raise ValueError('provide reference molecule')
+        location_2 = location[:-3]
+        if not mutation_script_location:
+            mutation_script_location = "/Users/GeneCentrix/google_drive/allergan_project/icm_files/peptide_discovery_p2rx3/scripts/mutation_script.icm"
+        mutation_script = open(mutation_script_location, 'r').read()
+        script = mutation_script.format(modification_prefix=modification_prefix,
+                                        location=location,
+                                        surround_aa=surround_aa,
+                                        location_2=location_2,
+                                        fileName=file_name,
+                                        refMol=ref
+                                        )
+        unfix_n = f'unfix V_//?vt* & {location}' if unfix_n else ''
+        self.mutation_script += 'add column t {""} {""} {""} {""} {""} {""} {""} name={"amino_acid", "vw", "el", "sf", "en", "tz", "to"}' + '\n' + unfix_n + '\n' + script
+        return
+
+    def icm_create_tails(self,
+                         create_tail_script_location,
+                         target_peptide,
+                         modification_side='C'
+                         ):
+        if not create_tail_script_location:
+            create_tail_script_location = "/Users/GeneCentrix/google_drive/allergan_project/icm_files/peptide_discovery_p2rx3/scripts/append_tails.icm"
+        loading_script = open(create_tail_script_location, 'r').read()
+        script = loading_script.format(target_peptide=f"a_wrkObj.{target_peptide}",
+                                       reference_peptide=f"a_1.{target_peptide}",
+                                       modification_side=modification_side
+                                       )
+        self.add_aas += script
+        return
+
+    def icm_single_aa(self,
+                      aa,
+                      mutation_script_location,
+                      location,
+                      surround_aa,
+                      kind,
+                      unfix_n=False,
+                      file_name='',
+                      ref=None):
+        """
+                amino_acid
+                location: location of aa to modify eg: a_3.a23/5
+                kind: append , reverse, mutate
+                """
+        if kind == 'append':
+            modification_prefix = "append"
+        elif kind == 'reverse':
+            modification_prefix = "append reverse"
+        else:
+            modification_prefix = ""
+        # TODO: add self tethers / add other optimized montecarlo and minimization parameters
+        if not aa:
+            aa
+        if not ref:
+            raise ValueError('provide reference molecule')
+        location_2 = location[:-3]
+        if not mutation_script_location:
+            mutation_script_location = "/Users/GeneCentrix/google_drive/allergan_project/icm_files/peptide_discovery_p2rx3/scripts/aa_mutation.icm"
+        mutation_script = open(mutation_script_location, 'r').read()
+        script = mutation_script.format(modification_prefix=modification_prefix,
+                                        location=location,
+                                        surround_aa=surround_aa,
+                                        location_2=location_2,
+                                        fileName=file_name,
+                                        refMol=ref,
+                                        aa=aa
+                                        )
+        unfix_n = f'unfix V_//?vt* & {location}' if unfix_n else ''
+        self.single_aa_mutation += unfix_n + '\n' + script
+
+        return
+
+
+if __name__ == "__main__":
+    working_directory = "/Users/GeneCentrix/google_drive/allergan_project/icm_files/peptide_discovery_p2rx3/004"
+    pdb_ref = '5svj'
+    mol = 'pep'
+    res = '5a'
+    sur_aa = '5b,5c'
+    aa = 'ala'
+
+    # hitlist = "mydock_output_2022_02_05_1222461.ob"
+    # docking_score = -25.35
+    # sequence = 'SDPTD'
+
+    # hitlist = "mydock_output_2022_02_08_2119531.ob"
+    # docking_score = -28.48
+    # sequence = 'DHAPR'
+
+    # hitlist = "mydock_output_2022_02_06_1727371.ob"
+    # docking_score = -24.39
+    # sequence = 'ECDCQ'
+
+    # hitlist = "mydock_output_2022_02_12_0722171.ob"
+    # docking_score = -27.13
+    # sequence = 'RVNII'
+
+    # hitlist = "mydock_output_2022_02_04_1907491.ob"
+    # docking_score = -24.3
+    # sequence = 'WGHNG'
+
+    # hitlist = "mydock_output_2022_02_05_1741241.ob"
+    # docking_score = -24.97
+    # sequence = 'WYPEG'
+
+    hitlist = "mydock_output_2022_02_06_2043171.ob"
+    docking_score = -23.22
+    sequence = 'YGTHW'
+
+    file_name = f'PepExt_{sequence}.icb'
+    mutation_only = False
+    all_scripts = True
+
+    script_loader = icm_script()
+    script_loader.create_loading_script(
+        working_directory=working_directory,
+        docking_hitlist=hitlist,
+        use_loading=True,
+        pdb_ref=pdb_ref,
+        loading_script_location=None,
+        docking_score=docking_score
+    )
+
+    # Extend C-Terminus
+    script_loader.icm_create_tails(create_tail_script_location=None,
+                                   target_peptide=mol,
+                                   modification_side='C')
+
+    # Extend N-Terminus
+    script_loader.icm_create_tails(create_tail_script_location=None,
+                                   target_peptide=mol,
+                                   modification_side='N')
+
+    # Mutation Script
+    script_loader.create_icm_script(mutation_script_location=None,
+                                    location=f'a_wrkObj.{mol}/{res}',
+                                    surround_aa=sur_aa,
+                                    unfix_n=False,
+                                    kind='',
+                                    file_name=file_name,
+                                    ref=f'a_1.{mol}'
+                                    )
+
+    script_loader.icm_single_aa(mutation_script_location=None,
+                                location=f'a_wrkObj.{mol}/{res}',
+                                surround_aa=sur_aa,
+                                unfix_n=False,
+                                kind='',
+                                file_name=file_name,
+                                ref=f'a_1.{mol}',
+                                aa=aa
+                                )
+
+    script_folder=f'/Users/GeneCentrix/google_drive/allergan_project/icm_files/peptide_discovery_p2rx3/scripts/ext_script/{file_name.split(".")[0]}'
+    if not exists(script_folder):
+        os.makedirs(script_folder)
+
+    if all_scripts:
+        scripts = ['loader', 'append_tails', 'mutation_script', 'single_aa_mutation']
+        variable_name = [script_loader.load_object,
+                         script_loader.add_aas,
+                         script_loader.mutation_script,
+                         script_loader.single_aa_mutation]
+        for script_name, var_name in zip(scripts, variable_name):
+            script_path = f"{script_folder}/{script_name}.icm" if script_name!="mutation_script" else f"{script_folder}/{script_name}_{res}.icm"
+            if exists(script_path):
+                handler = input(f"File Already exists:{script_path} \no-> overwirite\np-> pass\nYour Input -> ")
+                if handler.lower() == 'o':
+                    pass
+                elif handler.lower() == 'p':
+                    raise FileExistsError(f'{script_path} already exists')
+            else:
+                open(script_path, 'x').close()
+            with open(script_path, 'w') as f:
+                f.write(var_name if var_name else '')
+                f.close()
+
+    if mutation_only:
+        script_path = f"{script_folder}/mutation_script_{res}.icm"
+        if exists(script_path):
+            handler = input(f'File Already exists:{script_path} \no-> overwirite\np-> pass\nYour Input -> ')
+            if handler.lower() == 'o':
+                pass
+            elif handler.lower() == 'p':
+                raise FilpeExistsError(f'{script_path} already exists')
+        else:
+            open(script_path, 'x').close()
+
+        with open(script_path, 'w') as f:
+            f.write(script_loader.mutation_script)
+            f.close()
