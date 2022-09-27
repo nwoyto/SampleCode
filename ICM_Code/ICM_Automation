@@ -1,0 +1,313 @@
+# load docking project
+set directory "/Users/nick/Desktop/002/" # set working directory
+dockUpdateGlobals "mydock" -1 # load docking object
+if( yes & currentDockProj.l_readyReceptor ) dockDisplayMol "mydock" 0, -1 # display docking object
+
+# reference preprocessing
+read pdb “pdb code” # read ref molecule from pdb databank
+convertObject a_1. yes yes yes # convert XR / EM object to ICM object
+set object a_1.
+copy a_1. 'ref'
+delete a_1.!x
+set object a_1.
+rename a_ 'wrkObj'
+
+
+# load hitlist
+scanMakeHitList "mydock" "mydock_output_2022_07_23_0900071.ob" Name(Name( "mydock_output_2022_07_23_0900071" ),simple) 1 ==2 no 1 ==1 no ? 100 : 0
+sort mydock_output_2022_07_23_0900071.Score # sort by score
+
+# default parameters
+temperature = 1500.
+vwMethod=2
+tzMethod=1
+show clash
+show energy
+GRAPHICS.selectionLevel = 'atom'
+set terms 'tz,sf,en,el,hb,vw,14,to'
+
+pepInterest=0
+# load the peptide in objects
+for i = 1,Nof(mydock_output_2022_07_23_0900071)
+  if (Floor(mydock_output_2022_07_23_0900071.Score[i], 0.01) >= -30.51-0.1 & Floor(mydock_output_2022_07_23_0900071.Score[i], 0.01) <= -30.51+0.1) then
+    pepInterest=i
+    scanDsHit "mydock" "mydock_output_2022_07_23_0900071" pepInterest yes & yes ! yes
+  endif
+endfor
+
+rename Mol(a_1.)[Nof(Mol(a_1.))] String('pep')
+move a_mydock_rec.pep a_wrkObj.
+scanDsHit "mydock" "mydock_output_2022_07_23_0900071" pepInterest yes & yes ! yes
+rename Mol(a_1.)[Nof(Mol(a_1.))] String('pep')
+s_out = "/Users/nick/Desktop/002/"+String(Sequence(a_mydock_rec.pep))+".icb"
+writeProject s_out s_currentProject!=""
+set object a_wrkObj.
+
+
+#############################################
+# This script adds N/C tails to the peptide #
+#############################################
+# variables
+#   target_peptide: icm name of the target peptide (eg:a_wrkObj.a11)
+#   reference_peptide: icm name of the target peptide (eg:a_mydock_rec.a11)
+#   modification_side: N/C
+
+
+
+
+# unfix the variables to optimize
+set object a_wrkObj.
+unfix only V_//S & a_wrkObj.pep
+# Add gly to N terminal of the peptide to optimize
+if String('N')==String('N') then
+  unfix V_//?vt* & a_wrkObj.pep # unfix the peptide's N-terminal <- a25 from here onwards is specific to each peptide and will be required to be optimized for each instance
+  # add amino acid 3 times
+  modify append reverse a_wrkObj.pep/1 'gly'
+  modify append reverse a_wrkObj.pep/1a 'gly'
+  modify append reverse a_wrkObj.pep/1b 'gly'
+  unfix V_//S & a_wrkObj.pep/1a,1b,1c # unfix the newly added amino acid
+endif
+
+# add gly to C terminal of the peptide to optimize
+if String('C')==String('C') then
+  modify append a_wrkObj.pep/5 'gly'
+  modify append a_wrkObj.pep/5a 'gly'
+  modify append a_wrkObj.pep/5b 'gly'
+  unfix V_//S & a_wrkObj.pep/5a,5b,5c
+endif
+
+as_graph = a_wrkObj.pep/*
+unfix V_//H,M,P & Res(Atom(Sphere(as_graph (!Mol(as_graph))&Obj(a_wrkObj) 5.))) # unfix the side chains of selected amino acids
+set terms 'tz,sf,en,el,vw,to,en,14' # energy terms to optimize
+vwMethod=2 # set method of van Der Walls
+tzMethod=2 # method of tethers calculation
+show clash # lists the clashes in unfixed atoms
+ds clash # displays clash in the GUI
+temperature=1500. # temperature for optimization. 600-1500 are all acceptable values
+
+set selftethers a_wrkObj.a,a1,a2/*/ca # set tether to its own backbone to minimize the movement of the backbone
+set selftethers a_wrkObj.pep/2:4
+
+show energy # displays energy values of all parameters
+for _=1,3
+  minimize 1000 # minimize the energy in 3 steps. Technically equivalent to minimize 3000 but I do it in a loop. Default is 100
+endfor
+
+# This is a step that will minimize the target in more stringent manner after setting extra tethers to find a better conformation with minimal deviation from original object
+# RMDS less than 0.5 usually means there is minimal deviation from original object
+if (Rmsd(a_wrkObj.pep, a_2.pep) > 0.5) then
+  set tether a_wrkObj.pep/*/* a_2.pep/*/*
+  minimize 1000
+  show energy
+else
+  show energy
+endif
+
+###############################
+# This is the mutation script #
+###############################
+
+# create an empty table to store all energies
+add column t {"amino_acid"} {"vw"} {"el"} {"sf"} {"en"} {"tz"} {"to"}
+# load the file if a file name is provided
+if ("MPNTQ_NW.icb"!='') then
+  set directory "/Users/nick/Desktop/002/" # set working directory <- will change based on your directory structure
+  openFile "MPNTQ_NW.icb" 0 no no no no "append" 1 # open a file <- Name will change as per your file name
+endif
+
+aas=Array('ala','arg','asn','asp','cys','glu','gln','gly','his','ile','leu','lys','met','phe','pro','ser','thr','trp','tyr','val') # list of amino acids
+set object a_wrkObj. # set the necessary object as working object
+for i = 1,Nof(aas) # loops through each amino acid and mutates a single position and calculates all energy parameters. The best mutation is chosen for that position
+    temperature = 1500.
+    vwMethod=2
+    tzWeight=1.
+    tzMethod=1
+    set terms 'tz,sf,en'
+
+    add t i+1
+    t.A[i+1] = aas[i] # adds a row to the generated table
+    modify a_wrkObj.pep/5a aas[i] # mutates the mentioned amino acid
+    target = a_wrkObj.pep/*
+    unfix only V_//S & a_wrkObj.pep/5,5a,5b,5c/* # unfix the C-terminal and the mutated amino acid
+    unfix V_//H,M,P & Atom(Res(Sphere(a_wrkObj.pep/5a,Obj(a_wrkObj.) ,5.))) # unfix side chains of the neighboring amino acids
+    set vrestraint Res(Atom(v_//)) # sets biased probability in montecarlo search based on Ramachandran plot
+    for _=1,3
+        montecarlo # montecarlo search for unfixed variables
+    endfor
+
+    if (Energy('vw,14')<=0) then # if the vander Walls is less than 0 i.e. a "good" energy score we change the method to a more stringent and realistic vw energy scoring algorithm
+        vwMethod=1
+        for _=1,3
+            minimize # minimize instead of montecarlo to identify a close-ish conformation which is slightly better
+        endfor
+    endif
+
+    vwMethod=1
+    minimize
+    show energy # prints all energy parameters for a record in log file
+
+    # save all energy parameters in a table for quick review
+    t.B[i+1]=String(Energy("vw,14"))
+    t.C[i+1]=String(Energy("el"))
+    t.D[i+1]=String(Energy("sf"))
+    t.E[i+1]=String(Energy("en"))
+    t.F[i+1]=String(Energy("tz"))
+    t.G[i+1]=String(Energy("to"))
+
+    modify a_wrkObj.pep/5a 'gly' # modifies the target amino acid to gly
+    minimize 200 resets the peptide to close to original position before mutating to the next amino acid
+endfor
+
+rename t Split(String(Res(a_wrkObj.pep/5a)) '^')[2]
+s_out = "/Users/nick/Desktop/002/"+String(Sequence(a_2.!a,aatp ))+".icb"
+writeProject s_out s_currentProject!=""
+
+Nick W
+
+delete tethers
+tzWeight = 0
+cnWeight = 0
+vwMethod = 2
+
+unfix only V_//S & a_wrkObj.pep
+unfix only V_//?vt* & a_wrkObj.pep
+as_graph = Sphere(a_wrkObj.pep Obj(a_wrkObj.!pep) 5.)
+as_graph = Res(Atom(as_graph))
+unfix V_//H,M,P & as_graph
+set vrestraint Res(Atom(v_//))
+
+for i=1,3
+    minimize
+endfor
+
+vwMethod = 1
+for i = 1,3
+    minimize 500
+endfor
+
+show energy
+print(Rmsd(a_mydock_rec.pep/*/* a_wrkObj.pep/*/*))
+
+
+
+
+
+# Useful Commands
+
+set object a_wrkObj.
+unfix only V_//S & a_wrkObj.pep
+
+unfix only V_//H,M,P & Res(as_graph)
+
+unfix only V_//S & a_wrkObj.pep
+unfix only V_//?vt* & a_wrkObj.pep
+as_graph = Sphere(a_wrkObj.pep Obj(a_wrkObj.!pep) 5.)
+as_graph = Res(Atom(as_graph))
+unfix V_//H,M,P & as_graph
+
+set drestraint a_2.pep/^F5f/!c,ca,cb,n,hn,o a_2.x/^F284/!c,ca,cb,n,hn,o
+
+unfix V_//H,M,P & Res(as_graph)
+unfix only V_//S & a_2.pep/5b
+unfix V_//S & a_2.pep/5c,5d
+
+
+if String('C')==String('C') then
+  modify append a_wrkObj.pep/5 'gly'
+  modify append a_wrkObj.pep/5a 'gly'
+  modify append a_wrkObj.pep/5b 'gly'
+  modify append a_wrkObj.pep/5c 'gly'
+  modify append a_wrkObj.pep/5d 'gly'
+  modify append a_wrkObj.pep/5e 'gly'
+
+  unfix V_//S & a_wrkObj.pep/5a,5b,5c,5d,5e,5f
+endif
+unfix
+unfix only V_//S & a_wrkObj.pep/5a,5b,5c,5d,5e,5f
+
+set drestraint a_2.pep/^H5/!c,ca,cb,n,hn,o a_2.x/^H343/!c,ca,cb,n,hn,o
+set drestraint a_2.pep/^H5/oe2,cd,oe1 a_2.x/^H343/he22,ne2,he21
+
+
+set drestraint a_2.pep/^F5e/!c,ca,cb,n,hn,o a_2.x/^F367/!c,ca,cb,n,hn,o
+unfix only V_//S & a_2.pep/5c
+unfix V_//S & a_wrkObj.pep/5a,5b,5c,5d,5e
+unfix only V_//S & a_wrkObj.pep/5b,5c,5d
+
+
+set drestraint a_2.pep/^F5e/!c,ca,cb,n,hn,o a_2.x/^F/!c,ca,cb,n,hn,o
+
+set drestraint a_2.pep/^F5d/!c,ca,cb,n,hn,o a_2.x/^F367/!c,ca,cb,n,hn,o
+
+unfix only V_//H,M,P & Res(as_graph)
+
+N Term addition
+
+set drestraint a_2.pep/^F5f/!c,ca,cb,n,hn,o a_2.x/^F284/!c,ca,cb,n,hn,o
+
+set drestraint as_graph[1] as_graph[2]
+ds drestraint
+minimize
+
+set tether a_2.pep/1/n a_1.pep/1/n
+
+set tether a_2.pep/* a_1.pep/*
+unfix V_//?vt*
+
+set selftethers a_wrkObj.a,a1,a2/*/ca # set tether to its own backbone to minimize the movement of the backbone
+set selftethers a_wrkObj.pep/2:4
+
+set tether a_2.pep/2:5 a_1.pep/2:5
+
+
+if String('N')==String('N') then
+  unfix V_//?vt* & a_wrkObj.pep # unfix the peptide's N-terminal <- a25 from here onwards is specific to each peptide and will be required to be optimized for each instance
+  # add amino acid 3 times
+  modify append reverse a_wrkObj.pep/1 'gly'
+  modify append reverse a_wrkObj.pep/1a 'gly'
+  modify append reverse a_wrkObj.pep/1b 'gly'
+  unfix V_//S & a_wrkObj.pep/1a,1b,1c # unfix the newly added amino acid
+endif
+unfix V_//?vt* & a_2.pep
+
+unfix only V_//S & a_2.pep/5,5a,5b,5c,5d,5e,5f
+
+modify a_2.pep/5a "asp"
+
+modify append a_wrkObj.pep/5f'gly'
+
+set vrestraint Res(Atom(v_//))
+
+unfix only V_//S & a_2.pep/5a,5b,5c
+un
+modify a_2.pep/5b "asp"
+
+unfix V_//H,M,P & Res(as_graph)
+
+modify append a_wrkObj.pep/5e 'gly'
+modify append a_wrkObj.pep/5f 'gly'
+
+modify append a_wrkObj.pep/5g 'gly'
+modify append a_wrkObj.pep/5h 'gly'
+modify append a_wrkObj.pep/5i 'gly'
+
+###############################################################
+###################### NEW ####################################
+
+makeBioMT a_ [1] yes #make biomolecule
+
+291,304,302,343,333,294,296,345,344,303,300    #9
+291,343,302,292,304,333    #10
+291,302,304,343,333,344,303,345,294       #11
+291,294,333,302,343,292,304,295,296,345,299,344,303,293,300     #12
+
+
+#put the numbers that correlate to the gold standard hotspots
+Sum(Sum(Area(a_2.x/291,294,333,302,343,292,304,295,296,345,299,344,303,293,300 a_2.pep)))
+#put the numbers that correlate to the gold standard hotspots
+Sum(Sum(Area(a_2.x/291,294,333,302,343,292,304,295,296,345,299,344,303,293,300/!ca,c,n,o a_2.pep)))
+
+#put the numbers that correlate to all the hotspots
+Sum(Sum(Area(a_2.x/291,294,333,302,343,292,304,295,296,345,299,344,303,293,300 a_2.pep)))
+#put the numbers that correlate to all the hotspots
+Sum(Sum(Area(a_2.x/291,294,333,302,343,292,304,295,296,345,299,344,303,293,300/!ca,c,n,o a_2.pep)))
